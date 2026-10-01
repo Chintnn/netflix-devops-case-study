@@ -1,0 +1,9 @@
+node_modules
+.git
+.github
+ansible
+k8s
+docs
+screenshots
+scripts
+grafana
