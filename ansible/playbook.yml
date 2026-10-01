@@ -1,0 +1,87 @@
+---
+- name: Configure runtime environment for the Netflix service (macOS)
+  hosts: app_servers
+  become: true
+  vars:
+    app_user: netflixsvc
+    app_dir: /opt/netflix-app
+    app_port: 3000
+    app_version: "1.0.0"
+
+  tasks:
+    - name: Find Homebrew prefix
+      ansible.builtin.command: brew --prefix
+      register: brew_prefix
+      changed_when: false
+      become: false
+
+    - name: Install Node.js 20 with Homebrew
+      community.general.homebrew:
+        name: node@20
+        state: present
+      become: false
+
+    - name: Create service user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        system: true
+        group: staff
+        shell: /usr/bin/false
+        home: /var/empty
+        create_home: false
+
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: staff
+        mode: "0755"
+
+    - name: Copy application source
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../src/"
+        dest: "{{ app_dir }}/src/"
+        mode: "0644"
+
+    - name: Copy package files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        mode: "0644"
+      loop:
+        - package.json
+        - package-lock.json
+
+    - name: Render environment file from template
+      ansible.builtin.template:
+        src: app.env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ app_user }}"
+        group: staff
+        mode: "0640"
+
+    - name: Install Node dependencies
+      ansible.builtin.command: npm ci --omit=dev
+      args:
+        chdir: "{{ app_dir }}"
+        creates: "{{ app_dir }}/node_modules"
+      environment:
+        PATH: "{{ brew_prefix.stdout }}/opt/node@20/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+    - name: Set ownership of application files
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        recurse: true
+        owner: "{{ app_user }}"
+        group: staff
+
+    - name: Check Node version
+      ansible.builtin.command: "{{ brew_prefix.stdout }}/opt/node@20/bin/node --version"
+      register: node_version
+      changed_when: false
+
+    - name: Show result
+      ansible.builtin.debug:
+        msg: "Node {{ node_version.stdout }} ready, app deployed to {{ app_dir }}"
